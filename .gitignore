@@ -1,0 +1,4 @@
+.env
+rag.db
+*.db
+node_modules/

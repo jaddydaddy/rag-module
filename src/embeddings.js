@@ -3,7 +3,7 @@
  * Supports Gemini (free) and OpenAI (fallback)
  */
 
-const GEMINI_EMBEDDING_MODEL = 'text-embedding-004';
+const GEMINI_EMBEDDING_MODEL = 'gemini-embedding-001';
 const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 
 const MAX_RETRIES = 3;
