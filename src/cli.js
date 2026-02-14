@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /**
  * RAG CLI - Command line interface for the knowledge base
+ * Supports both SQLite (local) and Supabase (cloud) backends
  */
 
 import { RAG } from './rag.js';
+import { detectBackend } from './db.js';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
@@ -23,8 +25,12 @@ const args = process.argv.slice(2);
 const command = args[0];
 
 function printUsage() {
+  const backend = detectBackend();
   console.log(`
 RAG Knowledge Base CLI
+
+Current Backend: ${backend.toUpperCase()}
+${backend === 'supabase' ? '  (Using SUPABASE_URL and SUPABASE_KEY)' : '  (Set SUPABASE_URL + SUPABASE_KEY for cloud storage)'}
 
 Usage:
   rag ingest <url|file|text> [--tags tag1,tag2] [--db path]
@@ -38,7 +44,9 @@ Environment Variables:
   GEMINI_API_KEY    - Google Gemini API key (free embeddings)
   GOOGLE_API_KEY    - Alternative to GEMINI_API_KEY
   OPENAI_API_KEY    - OpenAI API key (fallback embeddings)
-  RAG_DB_PATH       - Default database path
+  RAG_DB_PATH       - Default database path (SQLite only)
+  SUPABASE_URL      - Supabase project URL (enables cloud backend)
+  SUPABASE_KEY      - Supabase anon/service key
 
 Examples:
   rag ingest https://example.com/article
@@ -115,8 +123,9 @@ async function main() {
           process.exit(1);
         }
         const topK = parseInt(opts.top) || 5;
-        const { results, prompt } = await rag.query(question, { topK });
+        const { results, prompt, backend } = await rag.query(question, { topK });
         
+        console.log(`\nBackend: ${backend}`);
         console.log('\nRelevant Sources:');
         results.forEach((r, i) => {
           console.log(`  ${i + 1}. ${r.title} (${(r.similarity * 100).toFixed(1)}%)`);
@@ -130,7 +139,7 @@ async function main() {
       case 'list': {
         const limit = parseInt(opts.limit) || 20;
         const sourceType = opts.type;
-        const sources = rag.list({ limit, sourceType });
+        const sources = await rag.list({ limit, sourceType });
         
         console.log(`\nSources (${sources.length}):`);
         sources.forEach(s => {
@@ -140,8 +149,9 @@ async function main() {
       }
 
       case 'stats': {
-        const stats = rag.stats();
+        const stats = await rag.stats();
         console.log('\nKnowledge Base Stats:');
+        console.log(`  Backend: ${stats.backend}`);
         console.log(`  Total Sources: ${stats.totalSources}`);
         console.log(`  Total Chunks: ${stats.totalChunks}`);
         console.log('  By Type:');
@@ -157,7 +167,7 @@ async function main() {
           console.error('Error: No source ID provided');
           process.exit(1);
         }
-        const result = rag.delete(id);
+        const result = await rag.delete(id);
         console.log(result.changes ? `Deleted source ${id}` : `Source ${id} not found`);
         break;
       }

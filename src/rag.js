@@ -1,9 +1,10 @@
 /**
  * Main RAG (Retrieval Augmented Generation) class
  * Ties together extraction, chunking, embedding, and retrieval
+ * Supports both SQLite (local) and Supabase (cloud) backends
  */
 
-import { RagDatabase } from './db.js';
+import { createDatabase, getDatabaseType } from './db-factory.js';
 import { EmbeddingProvider, cosineSimilarity } from './embeddings.js';
 import { extract, detectSourceType } from './extractors.js';
 import { createChunks } from './chunker.js';
@@ -15,27 +16,38 @@ const LOCK_TIMEOUT = 15 * 60 * 1000; // 15 minutes
 
 export class RAG {
   constructor(config = {}) {
+    this.config = config;
     this.dbPath = config.dbPath || './rag.db';
-    this.db = new RagDatabase(this.dbPath);
+    this.db = createDatabase(config);
     this.embedder = new EmbeddingProvider(config);
     this.chunkOptions = {
       chunkSize: config.chunkSize || 800,
       overlap: config.overlap || 200
     };
     this.lockPath = path.join(path.dirname(this.dbPath), LOCK_FILE);
+    this.isSupabase = getDatabaseType() === 'supabase';
   }
 
   /**
-   * Acquire lock for ingestion
+   * Helper to handle both sync (SQLite) and async (Supabase) methods
+   */
+  async dbCall(method, ...args) {
+    const result = this.db[method](...args);
+    return result instanceof Promise ? await result : result;
+  }
+
+  /**
+   * Acquire lock for ingestion (SQLite only)
    */
   acquireLock() {
+    if (this.isSupabase) return; // Supabase handles concurrency
+    
     if (fs.existsSync(this.lockPath)) {
       const stats = fs.statSync(this.lockPath);
       const age = Date.now() - stats.mtimeMs;
       if (age < LOCK_TIMEOUT) {
         throw new Error('Another ingestion is in progress');
       }
-      // Stale lock, remove it
       fs.unlinkSync(this.lockPath);
     }
     fs.writeFileSync(this.lockPath, process.pid.toString());
@@ -45,6 +57,7 @@ export class RAG {
    * Release lock
    */
   releaseLock() {
+    if (this.isSupabase) return;
     if (fs.existsSync(this.lockPath)) {
       fs.unlinkSync(this.lockPath);
     }
@@ -62,7 +75,7 @@ export class RAG {
       const extracted = await extract(input, options.sourceType);
       
       // Check for duplicates
-      const existing = this.db.sourceExists(extracted.url, extracted.content);
+      const existing = await this.dbCall('sourceExists', extracted.url, extracted.content);
       if (existing) {
         console.log(`Duplicate detected (source ID: ${existing.id}), skipping`);
         return { status: 'duplicate', sourceId: existing.id };
@@ -86,7 +99,7 @@ export class RAG {
       }));
       
       // Store source
-      const sourceId = this.db.insertSource({
+      const sourceId = await this.dbCall('insertSource', {
         url: extracted.url,
         title: extracted.title,
         sourceType: extracted.sourceType,
@@ -97,7 +110,7 @@ export class RAG {
       });
       
       // Store chunks
-      this.db.insertChunks(sourceId, chunksWithEmbeddings);
+      await this.dbCall('insertChunks', sourceId, chunksWithEmbeddings);
       
       console.log(`Successfully ingested: ${extracted.title} (ID: ${sourceId})`);
       
@@ -126,8 +139,24 @@ export class RAG {
     console.log('Embedding query...');
     const { embedding: queryEmbedding } = await this.embedder.embed(query);
     
-    // Get all chunks with embeddings
-    const chunks = this.db.getAllChunksWithEmbeddings();
+    // Try server-side search for Supabase
+    if (this.isSupabase && this.db.searchSimilar) {
+      const serverResults = await this.db.searchSimilar(queryEmbedding, topK);
+      if (serverResults) {
+        return serverResults.map(r => ({
+          sourceId: r.source_id,
+          title: r.title,
+          url: r.url,
+          sourceType: r.source_type,
+          content: r.content?.slice(0, maxCharsPerResult),
+          similarity: r.similarity,
+          chunkIndex: r.chunk_index
+        }));
+      }
+    }
+    
+    // Fall back to client-side search
+    const chunks = await this.dbCall('getAllChunksWithEmbeddings');
     console.log(`Searching ${chunks.length} chunks...`);
     
     // Calculate similarities
@@ -206,29 +235,29 @@ Answer:`;
   /**
    * List all sources
    */
-  list(options = {}) {
-    return this.db.listSources(options);
+  async list(options = {}) {
+    return await this.dbCall('listSources', options);
   }
 
   /**
    * Get a specific source
    */
-  getSource(id) {
-    return this.db.getSource(id);
+  async getSource(id) {
+    return await this.dbCall('getSource', id);
   }
 
   /**
    * Delete a source
    */
-  delete(id) {
-    return this.db.deleteSource(id);
+  async delete(id) {
+    return await this.dbCall('deleteSource', id);
   }
 
   /**
    * Get stats
    */
-  stats() {
-    return this.db.getStats();
+  async stats() {
+    return await this.dbCall('getStats');
   }
 
   /**

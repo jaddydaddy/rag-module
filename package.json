@@ -1,24 +1,36 @@
 {
   "name": "rag-module",
-  "version": "1.0.0",
-  "description": "Portable RAG (Retrieval Augmented Generation) knowledge base for AI agents",
+  "version": "2.0.0",
+  "description": "Portable RAG (Retrieval Augmented Generation) knowledge base for AI agents - supports SQLite and Supabase/pgvector",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
     "test": "node test/test.js",
     "ingest": "node src/cli.js ingest",
     "query": "node src/cli.js query",
-    "list": "node src/cli.js list"
+    "list": "node src/cli.js list",
+    "stats": "node src/cli.js stats"
   },
-  "keywords": ["rag", "embeddings", "knowledge-base", "ai-agent"],
+  "keywords": [
+    "rag",
+    "embeddings",
+    "knowledge-base",
+    "ai-agent",
+    "pgvector",
+    "supabase",
+    "sqlite"
+  ],
   "author": "AI Installer",
   "license": "MIT",
   "dependencies": {
-    "better-sqlite3": "^11.0.0",
-    "pdf-parse": "^1.1.1",
-    "youtube-transcript": "^1.2.1",
     "@mozilla/readability": "^0.5.0",
+    "better-sqlite3": "^11.0.0",
     "jsdom": "^24.0.0",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "pdf-parse": "^1.1.1",
+    "youtube-transcript": "^1.2.1"
+  },
+  "optionalDependencies": {
+    "@supabase/supabase-js": "^2.95.3"
   }
 }
